@@ -19,7 +19,8 @@ global telemetry is lex(
     "mun_transfer_score", mun_transfer_score@,
     "distance_to_mun_at_apoapsis", distance_to_mun_at_apoapsis@,
     "angle_to_mun", angle_to_mun@,
-    "altitude_at", altitude_at@
+    "altitude_at", altitude_at@,
+    "calculate_phase_angle", calculate_phase_angle@
 ).
 function init {}
 telemetry["init"]().
@@ -234,4 +235,14 @@ function angle_to_mun {
 function altitude_at {
     parameter t.
     return Kerbin:altitudeOf(positionAt(ship, t)).
+}
+
+// Calculate the phase angle between two vessels
+function calculate_phase_angle{
+    local angle_ship is obt:lan+obt:argumentofperiapsis+obt:trueanomaly.
+    local angle_target is target:obt:lan + target:obt:argumentofperiapsis + target:obt:trueanomaly.
+    local angle_phase is angle_target - angle_ship.
+    set angle_phase to angle_phase - 360 * floor(angle_phase/360).
+
+    return angle_phase.
 }

@@ -23,6 +23,7 @@ global maneuver is lex(
     "mun_transfer", mun_transfer@,
     "deorbit", deorbit@,
     "hohmann", hohmann@,
+    "orbital_angle_align", orbital_angle_align@,
     "pid_control", pid_control@
 ).
 function init {}
@@ -273,6 +274,52 @@ function hohmann {
         print "planning circularisation burn 2/2.".
         circularise().
     }
+}
+
+// Perform a burn and counter burn to align orbits with another vessel
+function orbital_angle_align {
+    parameter angle_desired.
+
+    local angle_phase is telemetry["calculate_phase_angle"]().
+    print("phase_angle_0 is " + angle_phase).
+    local angle_delta is angle_phase - angle_desired.
+    set angle_delta to angle_delta - 360 * floor(angle_delta/360).
+
+    if angle_delta < 180 {
+        set old_period to orbit:period.
+        lock steering to retrograde. wait 5.
+        lock throttle to 0.2.
+        set new_period to (1 - angle_delta/360) * target:orbit:period.
+        wait until orbit:period < new_period.
+        lock throttle to 0. wait 1.
+        set warp_time to time:seconds + orbit:period - 5.
+        warpto(warp_time).
+        wait until time:seconds > warp_time.
+        lock steering to prograde. wait 5.
+        lock throttle to 0.2.
+        wait until orbit:period > old_period.
+        lock throttle to 0.
+    }
+
+    if angle_delta > 180 {
+        set old_period to orbit:period.
+        lock steering to prograde. wait 5.
+        lock throttle to 0.2.
+        set new_period to (2 - angle_delta/360) * target:orbit:period.
+        wait until orbit:period > new_period.
+        lock throttle to 0. wait 1.
+        set warp_time to time:seconds + orbit:period - 5.
+        warpto(warp_time).
+        wait until time:seconds > warp_time.
+        lock steering to retrograde. wait 5.
+        lock throttle to 0.2.
+        wait until orbit:period < old_period.
+        lock throttle to 0.
+    }
+
+    set angle_phase to telemetry["calculate_phase_angle"]().
+    print("phase_angle_1 is " + angle_phase).
+
 }
 
 // PID control loop for a desired function
