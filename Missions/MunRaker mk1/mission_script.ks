@@ -10,12 +10,12 @@ maneuver["atmos_ascent"](125000, 90).
 until apoapsis > 125000 {
     maneuver["autostage"]().
 }
-//doShutdown().
+
 set mapview to true.
 maneuver["circularise"]().
 
-print("transfering to Munar orbit").
 //Transfer to the Mun
+print("transfering to Munar orbit").
 maneuver["mun_transfer"](20000).
 
 //Circularise into Mun orbit

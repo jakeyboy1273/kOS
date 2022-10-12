@@ -24,7 +24,8 @@ global maneuver is lex(
     "deorbit", deorbit@,
     "hohmann", hohmann@,
     "orbital_angle_align", orbital_angle_align@,
-    "pid_control", pid_control@
+    "pid_control", pid_control@,
+    "hoverslam", hoverslam@
 ).
 function init {}
 maneuver["init"]().
@@ -72,6 +73,7 @@ function eng_shutdown {
 // Basic launch script
 function launch {
 
+    lock steering to heading(0, 90).
     lock throttle to 1.
     safestage().
     wait 3.
@@ -184,11 +186,12 @@ function atmos_ascent {
         autostage().
     }
     eng_shutdown().
+    // Time warp out of the atmosphere, prior to calculating next maneuver
     until altitude > 70000 {
         set kuniverse:timewarp:mode to "PHYSICS".
         set kuniverse:timewarp:rate to 4.
-        set kuniverse:timewarp:mode to "RAILS".
     }
+    set kuniverse:timewarp:mode to "RAILS".
 }
 
 // Calculates and executes a circularisation maneuver
@@ -245,10 +248,10 @@ function mun_transfer {
 // Perform a simple deorbit burn
 function deorbit {
     lock steering to retrograde.
-    wait 2.
+    wait 5.
     lock throttle to 1.
-    wait until ship:periapsis < 10000.
-    lock throttle to 0.
+    wait until ship:periapsis < 0.
+    lock throttle to 0. wait 1.
     
 }
 
@@ -337,7 +340,7 @@ function pid_control {
 
     if pid_last_time > 0 {
         set i to pid_total_p + ((p + pid_last_p)/2 * (now - pid_last_time)).
-        set d to (p - pid_last_p) / (now - pid_last_time).
+        set d to (p - pid_last_p) / max(0.00001, (now - pid_last_time)).
     }
 
     set output to p * k_parameters[0] + i * k_parameters[1] + d * k_parameters[2].
@@ -348,4 +351,31 @@ function pid_control {
 
     autostage().
     return output.
+}
+
+// Perform a suicide burn and land on the orbiting body
+function hoverslam {
+    lock steering to srfRetrograde.
+    lock pct to telemetry["stopping_time"]() / telemetry["time_to_impact"]().
+    set warp to 4.
+    wait until pct > 0.5.
+    set warp to 0.
+    wait until pct > 1.
+    lock throttle to pct.
+    when telemetry["distance_to_ground"]() < 1000 then { gear on. }
+    wait until ship:verticalspeed > -5. print("PID control until safe landing").
+    local auto_throttle is 0. lock throttle to auto_throttle.
+    until alt:radar < 100 {
+        set auto_throttle  to max(0, min(maneuver["pid_control"](list(0.1, 0, 0), -20, ship:verticalspeed), 1)).
+    }
+    until alt:radar < 50 {
+        set auto_throttle  to max(0, min(maneuver["pid_control"](list(0.1, 0, 0), -5, ship:verticalspeed), 1)).
+    }
+    until alt:radar < 5 or ship:verticalspeed > 0 {
+        set auto_throttle  to max(0, min(maneuver["pid_control"](list(0.1, 0, 0), -2, ship:verticalspeed), 1)).
+    }
+    lock steering to telemetry["ground_slope"]().
+    lock throttle to 0.
+    wait 5.
+    unlock steering. sas on.
 }

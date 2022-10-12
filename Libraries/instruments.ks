@@ -8,7 +8,8 @@ global instruments is lex(
     "deploy_instruments", deploy_instruments@,
     "get_sensor_list", get_sensor_list@,
     "get_esu_list", get_esu_list@,
-    "get_all_science", get_all_science@
+    "get_all_science", get_all_science@,
+    "transmit_all_science", transmit_all_science@
 ).
 function init {}
 instruments["init"]().
@@ -105,4 +106,32 @@ function get_all_science {
         }
     }
     return device_list.
+}
+
+// Transmits all collected science
+function transmit_all_science {  
+    Declare Parameter trans_speed is 2.86.
+
+    //If no list of science parts sent to the function, get a list of all science parts on the ship.
+    local sensor_list is get_sensor_list().
+
+    for item in sensor_list {
+        //Check each sensor to see if has data.
+        if item:getmodule("ModuleScienceExperiment"):hasdata {
+            set data_list to item:getmodule("ModuleScienceExperiment"):data.
+            
+            //Get size and name of data
+            //":data" returns a list, must step through list to get info
+            for data in data_list {
+                local data_size is data:dataamount.  
+                local data_name is data:title.
+                print("Transmitting " + data_name + "...").        
+
+                local wait_time is (data_size / trans_speed) + 2.
+                item:getmodule("ModuleScienceExperiment"):transmit().
+                wait until item:getmodule("ModuleScienceExperiment"):hasdata = false. 
+                wait wait_time.  //wait while antenna xmits 
+            }
+        }
+    }                        
 }

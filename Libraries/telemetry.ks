@@ -22,7 +22,12 @@ global telemetry is lex(
     "angle_to_mun", angle_to_mun@,
     "altitude_at", altitude_at@,
     "calculate_phase_angle", calculate_phase_angle@,
-    "select_body_target", select_body_target@
+    "select_body_target", select_body_target@,
+    "distance_to_ground", distance_to_ground@,
+    "stopping_distance", stopping_distance@,
+    "stopping_time", stopping_time@,
+    "time_to_impact", time_to_impact@,
+    "ground_slope", ground_slope@
 ).
 function init {}
 telemetry["init"]().
@@ -293,4 +298,62 @@ function select_body_target {
     print "Select target from list: ".
     set target to target_list[terminal:input:getchar():toscalar].
     return target.
+}
+
+// Calculate the distance to the ground directly below the spacecraft
+// TODO: Get rid of the "5" magic number which is just a guess for ship height
+function distance_to_ground {
+    local height is altitude - body:geopositionOf(ship:position):terrainHeight - 5.
+    local pitch_angle is -arctan(ship:groundspeed / ship:verticalspeed).
+    local distance is height / cos(pitch_angle).
+    return distance.
+}
+
+// Calculate how far the ship would travel if it tried to stop
+function stopping_distance {
+    local grav is constant():g * (body:mass / body:radius^2).
+    local thrust is ship:availableThrust / ship:mass.
+    local max_deceleration is facing:vector*thrust - v(grav, 0, 0).
+    return ship:velocity:orbit:mag^2 / (2 * max_deceleration:mag).
+}
+
+function stopping_time {
+    local grav is constant():g * (body:mass / body:radius^2).
+    local thrust is ship:availableThrust / ship:mass.
+    local max_deceleration is facing:vector*thrust - v(grav, 0, 0).
+
+    local a is max_deceleration:mag.
+    local u is ship:velocity:orbit:mag.
+    return u/a.
+}
+
+function time_to_impact { 
+    local error is 1000.
+    local previous_time is Time:Seconds.
+    local time_step is 1.
+    
+    until error < 100 {
+        set vessel_position to positionAt(ship, (previous_time + time_step)).
+        local terrain_level to max((body:geoPositionOf(ship:position):terrainHeight), body:geoPositionOf(vessel_position):terrainHeight).
+        set error to ((vessel_position - body:position):mag - body:radius - terrain_level).
+        set previous_time to previous_time + time_step.
+    }.
+    return (previous_time + time_step) - time:seconds.
+}
+
+// Calculate the angle of the slope of the ground below
+function ground_slope {
+    local east is vectorCrossProduct(north:vector, up:vector).
+
+    local center is ship:position.
+
+    local a is body:geopositionOf(center + 5 * north:vector).
+    local b is body:geopositionOf(center - 3 * north:vector + 4 * east).
+    local c is body:geopositionOf(center - 3 * north:vector - 4 * east).
+
+    local a_vec is a:altitudePosition(a:terrainHeight).
+    local b_vec is a:altitudePosition(b:terrainHeight).
+    local c_vec is a:altitudePosition(c:terrainHeight).
+
+    return vectorCrossProduct(c_vec - a_vec, b_vec - a_vec):normalized.
 }
