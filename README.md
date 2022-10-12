@@ -92,3 +92,4 @@ A booster must have 3,500m/s delta-v (sea-level) for its weight class. It doesnâ
 - Organise missions by mission types, not just by ship. No point having `_UPDATE.ks` really because the ships are too dumb and only take a update file with no knowledge of where in the flight they are, so they are "one shot". There should just be a bunch of missions
 - create a second finish condition which checks if the maneuver node has pinged off e.g. `if mnv:deltaV:mag > 0.1 * (start_dv) and abs(steering_angle - maneuver_angle) > 10 {set finish_maneuver to true.}`
 - `atmos_ascent` make it somehow body agnostic, depending on atmosphere heights and stuff (just needs a lookup table of atmos ceiling for each body)
+- maneuver completion - throttle scaling also should be based on burn time i.e. below a certain duration the throttle should be very low and the completion criteria should be widened

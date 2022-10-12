@@ -117,12 +117,20 @@ function execute_maneuver {
     local mnv is node(m_list[0], m_list[1], m_list[2], m_list[3]).
     add_maneuver(mnv).
     local start_time is telemetry["start_time"](mnv).
-    warpto(start_time - 15).
-    wait until time:seconds > start_time - 10.
+    warpto(start_time - 16).
+    wait until time:seconds > start_time - 15.
     lock_steering(mnv).
     wait until time:seconds > start_time.
-    set original_dv to mnv:deltaV:mag.
-    wait until maneuver_complete(mnv, original_dv).
+    local original_dv is mnv:deltaV:mag.
+    local burn_time is telemetry["burn_time"](mnv).
+    if burn_time < 5 {
+        until mnv:deltaV:mag < 0.01 * (original_dv) {
+            lock throttle to (1/3) * (burn_time / 5).
+            autostage().
+        }
+    } else {
+       wait until maneuver_complete(mnv, original_dv).
+    }
     lock throttle to 0.
     unlock steering.
     remove_maneuver(mnv).
@@ -176,6 +184,11 @@ function atmos_ascent {
         autostage().
     }
     eng_shutdown().
+    until altitude > 70000 {
+        set kuniverse:timewarp:mode to "PHYSICS".
+        set kuniverse:timewarp:rate to 4.
+        set kuniverse:timewarp:mode to "RAILS".
+    }
 }
 
 // Calculates and executes a circularisation maneuver
@@ -223,8 +236,6 @@ function mun_transfer {
     mid_course_correction(mun_periapsis).
     wait 2.
 
-    
-    
     // Warp to the Mun encounter
     warpto(time:seconds + orbit:nextPatchEta - 5).
     wait until body = Mun.

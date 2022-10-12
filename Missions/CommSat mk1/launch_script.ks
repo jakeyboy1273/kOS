@@ -13,15 +13,7 @@ until apoapsis > 2863334 {
 set mapview to true.
 maneuver["circularise"]().
 
-// Go to the correct angle.
-list targets in target_list.
-for targ in target_list {
-    if targ:name = ship:name {
-        set target to targ.
-        // break.
-    }
-}
-maneuver["orbital_angle_align"](120).
+maneuver["orbital_angle_align"](300).
 set target to body.
 
 unlock steering. wait 1.
