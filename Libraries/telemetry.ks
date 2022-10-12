@@ -16,11 +16,13 @@ global telemetry is lex(
     "protect_from_past", protect_from_past@,
     "eccentricity_score", eccentricity_score@,
     "apoapsis_periapsis_score", apoapsis_periapsis_score@,
+    "period_score", period_score@,
     "mun_transfer_score", mun_transfer_score@,
     "distance_to_mun_at_apoapsis", distance_to_mun_at_apoapsis@,
     "angle_to_mun", angle_to_mun@,
     "altitude_at", altitude_at@,
-    "calculate_phase_angle", calculate_phase_angle@
+    "calculate_phase_angle", calculate_phase_angle@,
+    "select_body_target", select_body_target@
 ).
 function init {}
 telemetry["init"]().
@@ -195,6 +197,22 @@ function apoapsis_periapsis_score {
     return result.
 }
 
+// Calculates a score based on minimum eccentricity achieved by a maneuver
+function period_score {
+    parameter data.
+
+    local mnv is 0.
+    if altitude_delta() > 0 {
+        set mnv to node(time:seconds + eta:apoapsis, 0, 0, data[0]).
+    } else {
+        set mnv to node(time:seconds + eta:periapsis, 0, 0, data[0]).
+    }
+    maneuver["add_maneuver"](mnv).
+    local result is mnv:orbit:period.
+    maneuver["remove_maneuver"](mnv).
+    return result.
+}
+
 // Calculates a score based on distance to mun
 function mun_transfer_score {
     parameter data.
@@ -238,11 +256,41 @@ function altitude_at {
 }
 
 // Calculate the phase angle between two vessels
-function calculate_phase_angle{
+function calculate_phase_angle {
     local angle_ship is obt:lan+obt:argumentofperiapsis+obt:trueanomaly.
     local angle_target is target:obt:lan + target:obt:argumentofperiapsis + target:obt:trueanomaly.
     local angle_phase is angle_target - angle_ship.
     set angle_phase to angle_phase - 360 * floor(angle_phase/360).
 
     return angle_phase.
+}
+
+// Prompts the user to select a target from all other ships orbiting the current body
+function select_body_target {
+    set target to body.
+    
+    list targets in all_target_list.
+    local target_list is list().
+    local target_name_list is list().
+
+    // Generate a list of all vessels orbiting the current body
+    print("Selecting a new target...").
+    for targ in all_target_list {
+        if targ:body = body {
+            target_list:add(targ).
+            target_name_list:add(targ:name).
+        }
+    }
+
+    // Generate a user-readable list to select from
+    local i is 0.
+    for targ in target_name_list {
+        print(i + ": " + targ).
+        set i to i + 1.
+    }
+
+    // Prompt the user to select a target
+    print "Select target from list: ".
+    set target to target_list[terminal:input:getchar():toscalar].
+    return target.
 }

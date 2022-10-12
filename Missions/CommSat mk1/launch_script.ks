@@ -1,4 +1,4 @@
-// This ship transfers to a low Kerbin orbit, ready to perform orbital timing experiments.
+// This ship transfers to a low Kerbin orbit, then positions itself at a phase angle with a target craft.
 
 // Import libraries
 set maneuver to lex().

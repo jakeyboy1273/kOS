@@ -8,7 +8,7 @@ print "maneuver: LOADING".
 global maneuver is lex(
     "init", init@,
     "safestage", safestage@,
-    "throttle_down", throttle_down@,
+    "throttle_control", throttle_control@,
     "eng_shutdown", eng_shutdown@,
     "launch", launch@,
     "autostage", autostage@,
@@ -44,14 +44,21 @@ function safestage {
 }
 
 // Maps throttle to gradually decrease as a burn ends
-function throttle_down {
-    parameter mnv.
-    
+function throttle_control {
+    parameter mnv, down_only is false.
+   
     set a to 9.36.
     set b to 2/3.
-    set c to 3.
-    set d to max(mnv, b).
-    set throttle_value to ((cos((180 / 3.1415) * a * (d - b))) / c) + ((c - 1) / c).
+    set c1 to 2.5.
+    set c2 to 3.
+
+    if mnv < 1/3 and down_only = false {
+        set throttle_value to -((cos((180 / 3.1415) * a * (mnv - b))) / c1) + ((c1 - 1) / c1).
+    } else if mnv > 2/3 {
+        set throttle_value to ((cos((180 / 3.1415) * a * (mnv - b))) / c2) + ((c2 - 1) / c2).
+    } else {
+        set throttle_value to 1.
+    }
     return throttle_value.
 }
 
@@ -115,7 +122,6 @@ function execute_maneuver {
     lock_steering(mnv).
     wait until time:seconds > start_time.
     set original_dv to mnv:deltaV:mag.
-    lock throttle to 1.
     wait until maneuver_complete(mnv, original_dv).
     lock throttle to 0.
     unlock steering.
@@ -135,13 +141,10 @@ function maneuver_complete {
     if start_dv = -1 {
         set start_dv to mnv_dv.
     }
-    // TODO: create a second finish condition which checks if the maneuver node has pinged off
-    //set finish_maneuver to false.
-    //if mnv:deltaV:mag > 0.001 * (start_dv) {set finish_maneuver to true.}
-    //if mnv:deltaV:mag > 0.1 * (start_dv) and abs(steering_angle - maneuver_angle) > 10 {set finish_maneuver to true.}
+    
     if mnv:deltaV:mag > 0.005 * (start_dv) {
         lock delta_v_ratio to 1- (mnv:deltaV:mag / start_dv).
-        lock throttle_value to throttle_down(delta_v_ratio).
+        lock throttle_value to throttle_control(delta_v_ratio).
         lock throttle to throttle_value.
         autostage().
         return false.
@@ -153,13 +156,11 @@ function maneuver_complete {
 }
 
 // Gravity turn through atmosphere
-// TODO: make this body-agnostic
 function atmos_ascent {
     parameter target_altitude, inclination.
 
     // Set the direction and pitch according to the targets
     set target_direction to inclination.
-    //lock targetPitch to 88.963 - 1.03287 * alt:radar ^ 0.409511.
     lock target_pitch to 90 - 0.98049377 * alt:radar  ^ 0.40511.
     lock steering to heading(target_direction, target_pitch).
 
@@ -167,7 +168,7 @@ function atmos_ascent {
     list engines in engine_list.
     until apoapsis > target_altitude or engine_list:length = 0 {
         lock altitude_ratio to apoapsis / target_altitude.
-        lock throttle_value to throttle_down(altitude_ratio).
+        lock throttle_value to throttle_control(altitude_ratio, true).
         lock throttle to throttle_value.
         if target_pitch < 0 {
             lock steering to heading(target_direction, 0).
@@ -192,27 +193,11 @@ function circularise {
 function mid_course_correction {
     parameter new_periapsis.
 
-    print("Warping to mid-course correction.").
-    set warp_time to time:seconds + (orbit:nextpatcheta/4).
-    warpto(warp_time).
-    wait until time:seconds > (warp_time + 5).
-    if orbit:nextpatch:periapsis < new_periapsis {
-        print("Increasing periapsis to desired altitude...").
-        lock steering to prograde. wait 5.
-        until orbit:nextpatch:periapsis > new_periapsis {
-            lock throttle to 0.1.
-        }
-        lock throttle to 0.
-        unlock steering.
-    } else {
-        print("Decreasing periapsis to desired altitude...").
-        lock steering to retrograde. wait 5.
-        until orbit:nextpatch:periapsis < new_periapsis {
-            lock throttle to 0.1.
-        }
-        lock throttle to 0.
-        unlock steering.
-    }
+    local start_search_time is time:seconds + (orbit:nextpatcheta/4).
+    local transfer is list(start_search_time, 0, 0, 0).
+    set transfer to telemetry["improve_converge"](transfer, telemetry["protect_from_past"](telemetry["mun_transfer_score"]@), new_periapsis).
+    execute_maneuver(transfer).
+    wait 2.
 }
 
 // Performs a transfer to the Mun
@@ -227,16 +212,17 @@ function mun_transfer {
         ).
     local transfer is list(start_search_time, 0, 0, 0).
     set transfer to telemetry["improve_converge"](transfer, telemetry["protect_from_past"](telemetry["mun_transfer_score"]@), mun_periapsis).
-    maneuver["execute_maneuver"](transfer).
+    execute_maneuver(transfer).
     wait 2.
     
     // Perform a mid-course correction if necessary
-    if (abs(orbit:nextpatch:periapsis - mun_periapsis)/mun_periapsis) > 0.05 {
-        mid_course_correction(mun_periapsis).
-        wait 2.
-    } else {
+    if (abs(orbit:nextpatch:periapsis - mun_periapsis)/mun_periapsis) < 0.1 {
         print("No mid-course correction is required.").
+        return 0.
     }
+    mid_course_correction(mun_periapsis).
+    wait 2.
+
     
     
     // Warp to the Mun encounter
@@ -249,7 +235,6 @@ function mun_transfer {
 function deorbit {
     lock steering to retrograde.
     wait 2.
-    // TODO: function to ramp up throttle (same as the ramp down one?)
     lock throttle to 1.
     wait until ship:periapsis < 10000.
     lock throttle to 0.
@@ -280,46 +265,40 @@ function hohmann {
 function orbital_angle_align {
     parameter angle_desired.
 
+    // User selects target ship, and initial phase angle is calculated
+    set target to telemetry["select_body_target"]().
     local angle_phase is telemetry["calculate_phase_angle"]().
     print("phase_angle_0 is " + angle_phase).
+    
+    // Transfer orbit is calculated for desired phase separation
     local angle_delta is angle_phase - angle_desired.
     set angle_delta to angle_delta - 360 * floor(angle_delta/360).
-
     if angle_delta < 180 {
-        set old_period to orbit:period.
-        lock steering to retrograde. wait 5.
-        lock throttle to 0.2.
         set new_period to (1 - angle_delta/360) * target:orbit:period.
-        wait until orbit:period < new_period.
-        lock throttle to 0. wait 1.
-        set warp_time to time:seconds + orbit:period - 5.
-        warpto(warp_time).
-        wait until time:seconds > warp_time.
-        lock steering to prograde. wait 5.
-        lock throttle to 0.2.
-        wait until orbit:period > old_period.
-        lock throttle to 0.
-    }
-
-    if angle_delta > 180 {
-        set old_period to orbit:period.
-        lock steering to prograde. wait 5.
-        lock throttle to 0.2.
+    } else {
         set new_period to (2 - angle_delta/360) * target:orbit:period.
-        wait until orbit:period > new_period.
-        lock throttle to 0. wait 1.
-        set warp_time to time:seconds + orbit:period - 5.
-        warpto(warp_time).
-        wait until time:seconds > warp_time.
-        lock steering to retrograde. wait 5.
-        lock throttle to 0.2.
-        wait until orbit:period < old_period.
-        lock throttle to 0.
     }
 
+    // Transfer maneuver is calculated and executed
+    local transfer is list(0).
+    set transfer to telemetry["improve_converge"](transfer, telemetry["period_score"]@, new_period).
+    if telemetry["altitude_delta"]() > 0 {
+        execute_maneuver(list(time:seconds + eta:apoapsis, 0, 0, transfer[0])).
+    } else {
+        execute_maneuver(list(time:seconds + eta:periapsis, 0, 0, transfer[0])).
+    }
+
+    // Warp one full orbit, then re-circularise
+    wait 1.
+    set warp_time to time:seconds + orbit:period - 60.
+    warpto(warp_time).
+    wait until time:seconds > warp_time.
+    circularise().
+
+    // Calculate and print new phase angle
     set angle_phase to telemetry["calculate_phase_angle"]().
     print("phase_angle_1 is " + angle_phase).
-
+    return angle_phase.
 }
 
 // PID control loop for a desired function

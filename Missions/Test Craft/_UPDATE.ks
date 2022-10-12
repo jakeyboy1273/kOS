@@ -1,11 +1,6 @@
-// TEST SCRIPT FOR TRYING STUFF.
-
 // Import libraries
-set instruments to lex().
-runoncepath("0:/Libraries/" + instruments.ks).
+set maneuver to lex().
+runoncepath("0:/Libraries/" + maneuver.ks).
 
-instruments["get_all_science"]().
-
-wait 2.
-
-instruments["get_all_science"]().
+set mapview to true.
+maneuver["orbital_angle_align"](180).
