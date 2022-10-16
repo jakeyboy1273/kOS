@@ -20,12 +20,13 @@ global maneuver is lex(
     "atmos_ascent", atmos_ascent@,
     "circularise", circularise@,
     "mid_course_correction", mid_course_correction@,
-    "mun_transfer", mun_transfer@,
+    "target_transfer", target_transfer@,
     "deorbit", deorbit@,
     "hohmann", hohmann@,
     "orbital_angle_align", orbital_angle_align@,
     "pid_control", pid_control@,
-    "hoverslam", hoverslam@
+    "hoverslam", hoverslam@,
+    "match_inclination", match_inclination@
 ).
 function init {}
 maneuver["init"]().
@@ -209,39 +210,50 @@ function circularise {
 function mid_course_correction {
     parameter new_periapsis.
 
-    local start_search_time is time:seconds + (orbit:nextpatcheta/4).
+    // Start search either on way to next patch or on way to apoapsis
+    local start_search_time is 0.
+    if orbit:hasnextpatch {
+        set start_search_time to time:seconds + (orbit:nextpatcheta/4).
+    } else {
+        set start_search_time to time:seconds + (orbit:eta:apoapsis/4).
+    }
+
+    // Perform a mid-course transfer optimisation search
     local transfer is list(start_search_time, 0, 0, 0).
-    set transfer to telemetry["improve_converge"](transfer, telemetry["protect_from_past"](telemetry["mun_transfer_score"]@), new_periapsis).
+    set transfer to telemetry["improve_converge"](transfer, telemetry["protect_from_past"](telemetry["transfer_score"]@), new_periapsis).
     execute_maneuver(transfer).
     wait 2.
 }
 
-// Performs a transfer to the Mun
-function mun_transfer {
-    parameter mun_periapsis.
+// Performs a transfer to the target body
+function target_transfer {
+    parameter targ, target_periapsis.
+
+    set target to targ.
+    match_inclination().
 
     local start_search_time is telemetry["ternary_search"](
-            telemetry["angle_to_mun"]@,
+            telemetry["angle_to_target"]@,
             time:seconds + 30,
             time:seconds + 30 + orbit:period,
             1
         ).
     local transfer is list(start_search_time, 0, 0, 0).
-    set transfer to telemetry["improve_converge"](transfer, telemetry["protect_from_past"](telemetry["mun_transfer_score"]@), mun_periapsis).
+    set transfer to telemetry["improve_converge"](transfer, telemetry["protect_from_past"](telemetry["transfer_score"]@), target_periapsis).
     execute_maneuver(transfer).
     wait 2.
     
     // Perform a mid-course correction if necessary
-    if (abs(orbit:nextpatch:periapsis - mun_periapsis)/mun_periapsis) < 0.1 {
+    if (abs(orbit:nextpatch:periapsis - target_periapsis)/target_periapsis) < 0.1 {
         print("No mid-course correction is required.").
         return 0.
     }
-    mid_course_correction(mun_periapsis).
+    mid_course_correction(target_periapsis).
     wait 2.
 
     // Warp to the Mun encounter
     warpto(time:seconds + orbit:nextPatchEta - 5).
-    wait until body = Mun.
+    wait until body = targ.
     wait 2.
 }
 
@@ -377,5 +389,42 @@ function hoverslam {
     lock steering to telemetry["ground_slope"]().
     lock throttle to 0.
     wait 5.
-    unlock steering. sas on.
+}
+
+// Perform a burn to match orbital inclination with that of a target craft
+function match_inclination {
+
+    // Skip this step if 
+    if telemetry["relative_inclination"]() < 0.5 {
+        print("No inclination match is required.").
+        return 0.
+    }
+
+    // Find and warp to the next node
+    local ascending is true.
+    local next_node_angle is telemetry["angle_to_relative_node"]().
+    local normal_vec is -vcrs(ship:velocity:orbit,-body:position).
+    if next_node_angle < 0 {
+        set next_node_angle to telemetry["angle_to_relative_node"](False).
+        set normal_vec to -normal_vec.
+        set ascending to false.
+    }
+    local time_to_node is (next_node_angle/360) * orbit:period.
+    set warp_time to time:seconds + time_to_node - 20.
+    warpto(warp_time).
+    wait until time:seconds > warp_time.
+
+    // Lock steering to normal or anti-normal
+    if ascending {
+            lock steering to -vcrs(ship:velocity:orbit,-body:position).
+        } else {
+            lock steering to vcrs(ship:velocity:orbit,-body:position).
+        }
+        wait 5.
+
+    // Throttle up until the relative inclination is below the desired value
+    until telemetry["relative_inclination"]() < 0.5 {
+        lock throttle to 1.
+    }
+    lock throttle to 0.
 }

@@ -17,9 +17,10 @@ global telemetry is lex(
     "eccentricity_score", eccentricity_score@,
     "apoapsis_periapsis_score", apoapsis_periapsis_score@,
     "period_score", period_score@,
-    "mun_transfer_score", mun_transfer_score@,
-    "distance_to_mun_at_apoapsis", distance_to_mun_at_apoapsis@,
-    "angle_to_mun", angle_to_mun@,
+    "transfer_score", transfer_score@,
+    "distance_to_target_at_apoapsis", distance_to_target_at_apoapsis@,
+    "distance_to_target_at_patch_apoapsis", distance_to_target_at_patch_apoapsis@,
+    "angle_to_target", angle_to_target@,
     "altitude_at", altitude_at@,
     "calculate_phase_angle", calculate_phase_angle@,
     "select_body_target", select_body_target@,
@@ -27,7 +28,11 @@ global telemetry is lex(
     "stopping_distance", stopping_distance@,
     "stopping_time", stopping_time@,
     "time_to_impact", time_to_impact@,
-    "ground_slope", ground_slope@
+    "ground_slope", ground_slope@,
+    "orbit_binormal", orbit_binormal@,
+    "relative_nodal_vector", relative_nodal_vector@,
+    "angle_to_relative_node", angle_to_relative_node@,
+    "relative_inclination", relative_inclination@
 ).
 function init {}
 telemetry["init"]().
@@ -218,51 +223,93 @@ function period_score {
     return result.
 }
 
-// Calculates a score based on distance to mun
-function mun_transfer_score {
+// Calculates a score based on periapsis of next patch, or distance at apoapsis of current patch if not
+function transfer_score {
     parameter data.
+    parameter targ is target.
+
     local mnv is node(data[0], data[1], data[2], data[3]).
     maneuver["add_maneuver"](mnv).
     local result is 0.
-    if mnv:orbit:hasNextPatch {
-        set result to mnv:orbit:nextPatch:periapsis.
+
+    if mnv:orbit:hasnextpatch {
+        local next_patch_orbit is mnv:orbit:nextpatch.
+        local no_next_patch is false.
+        until no_next_patch {
+            if next_patch_orbit:body = targ {
+                set result to next_patch_orbit:periapsis.
+                set no_next_patch to true.
+            } else {
+                if next_patch_orbit:hasnextpatch = false {
+                    set no_next_patch to true.
+                    set result to distance_to_target_at_patch_apoapsis(next_patch_orbit, targ).
+                } else {
+                    set next_patch_orbit to next_patch_orbit:nextpatch.
+                }
+            }
+        }
     } else {
-        set result to distance_to_mun_at_apoapsis(mnv).
+        set result to distance_to_target_at_apoapsis(mnv, targ).
     }
     maneuver["remove_maneuver"](mnv).
     return result.
 }
 
-// Calculates the distance to the Mun at the apoapsis of the current Kerbin orbit
-function distance_to_mun_at_apoapsis {
+// // Calculates a score based on periapsis of next patch, or distance at apoapsis of current patch if not
+// function transfer_score {
+//     parameter data.
+//     local mnv is node(data[0], data[1], data[2], data[3]).
+//     maneuver["add_maneuver"](mnv).
+//     local result is 0.
+//     if mnv:orbit:hasNextPatch {
+//         set result to mnv:orbit:nextPatch:periapsis.
+//     } else {
+//         set result to distance_to_target_at_apoapsis(mnv).
+//     }
+//     maneuver["remove_maneuver"](mnv).
+//     return result.
+// }
+
+// Calculates the distance to a target body at the maneuver's apoapsis
+function distance_to_target_at_apoapsis {
     parameter mnv.
+    parameter targ is target.
     local apoapsis_time is ternary_search(
         altitude_at@,
         time:seconds + mnv:eta,
         time:seconds + mnv:eta + (mnv:orbit:period / 2),
         1
     ).
-    return (positionAt(ship, apoapsis_time) - positionAt(mun, apoapsis_time)):mag.
+    return (positionAt(ship, apoapsis_time) - positionAt(targ, apoapsis_time)):mag.
 }
 
-// Calculate the current angle to the Mun
-function angle_to_mun {
+// Calculates the distance to a target body at an orbit patch's apoapsis
+function distance_to_target_at_patch_apoapsis {
+    parameter patch.
+    parameter targ is target.
+
+    local apoapsis_time is time:seconds + patch:eta:apoapsis.
+    return (positionAt(ship, apoapsis_time) - positionAt(targ, apoapsis_time)):mag.
+}
+
+// Calculate the current angle to the target body
+function angle_to_target {
     parameter t.
     return vectorAngle(
-        Kerbin:position - positionAt(ship, t),
-        Kerbin:position - positionAt(Mun, t)
+        body:position - positionAt(ship, t),
+        body:position - positionAt(target, t)
     ).
 }
 
 // Calculate the altitude of the ship
 function altitude_at {
     parameter t.
-    return Kerbin:altitudeOf(positionAt(ship, t)).
+    return body:altitudeOf(positionAt(ship, t)).
 }
 
 // Calculate the phase angle between two vessels
 function calculate_phase_angle {
-    local angle_ship is obt:lan+obt:argumentofperiapsis+obt:trueanomaly.
+    local angle_ship is obt:lan + obt:argumentofperiapsis + obt:trueanomaly.
     local angle_target is target:obt:lan + target:obt:argumentofperiapsis + target:obt:trueanomaly.
     local angle_phase is angle_target - angle_ship.
     set angle_phase to angle_phase - 360 * floor(angle_phase/360).
@@ -356,4 +403,47 @@ function ground_slope {
     local c_vec is a:altitudePosition(c:terrainHeight).
 
     return vectorCrossProduct(c_vec - a_vec, b_vec - a_vec):normalized.
+}
+
+// In the direction of orbital angular momentum of ves
+function orbit_binormal {
+    parameter ves is ship.
+
+    return vcrs((ves:position - ves:body:position):normalized, ves:velocity:orbit:normalized):normalized.
+}
+
+// Vector directed from the relative descending node to the ascending node
+function relative_nodal_vector {
+    parameter ves is ship.
+    parameter tar is target.
+
+    local orbit_birnormal is orbit_binormal(ves).
+    local target_binormal is orbit_binormal(tar).
+    return vcrs(orbit_birnormal, target_binormal):normalized.
+}
+
+// Angle to relative node determined from args
+function angle_to_relative_node {
+    parameter is_ascending is true.
+    parameter ves is ship.
+    parameter tar is target.
+
+    local join_vector is relative_nodal_vector(ves, tar).
+    if is_ascending = false {
+        set join_vector to -join_vector.
+    }
+    local angle is vang(-body:position:normalized, join_vector).
+    local sign_vector is vcrs(-body:position, join_vector).
+    local sign is vdot(orbit_binormal(ves), sign_vector).
+    if sign < 0 {
+        set angle to angle * -1.
+    }
+    return angle.
+}
+
+function relative_inclination {
+  parameter targ is target.
+  parameter u_time is time:seconds.
+
+  return vang(vcrs(velocityAt(ship,u_time):orbit,positionAt(ship,u_time)), vcrs(velocityAt(targ,u_time):orbit,positionAt(targ,u_time))).
 }

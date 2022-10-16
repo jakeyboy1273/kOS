@@ -15,7 +15,7 @@ maneuver["circularise"]().
 
 print("transfering to Munar orbit").
 //Transfer to the Mun
-maneuver["mun_transfer"](200000). wait 5.
+maneuver["target_transfer"](mun, 200000). wait 5.
 
 //wait until the new Kerbian periapsis, then deorbit
 warpto(time:seconds + orbit:nextPatchEta - 5).

@@ -18,7 +18,7 @@ maneuver["circularise"]().
 
 print("transfering to Munar orbit").
 // Transfer to the Mun, then collect science
-maneuver["mun_transfer"](45000). wait 5.
+maneuver["target_transfer"](mun, 45000). wait 5.
 instruments["get_all_science"]().
 
 // Collect more science once in a lower orbit

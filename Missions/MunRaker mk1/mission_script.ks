@@ -16,7 +16,7 @@ maneuver["circularise"]().
 
 //Transfer to the Mun
 print("transfering to Munar orbit").
-maneuver["mun_transfer"](20000).
+maneuver["target_transfer"](mun, 20000).
 
 //Circularise into Mun orbit
 maneuver["circularise"]().
