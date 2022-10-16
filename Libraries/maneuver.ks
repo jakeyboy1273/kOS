@@ -26,7 +26,11 @@ global maneuver is lex(
     "orbital_angle_align", orbital_angle_align@,
     "pid_control", pid_control@,
     "hoverslam", hoverslam@,
-    "match_inclination", match_inclination@
+    "match_inclination", match_inclination@,
+    "await_closest_approach", await_closest_approach@,
+    "cancel_relative_velocity", cancel_relative_velocity@,
+    "approach", approach@,
+    "rendezvous", rendezvous@
 ).
 function init {}
 maneuver["init"]().
@@ -290,9 +294,13 @@ function hohmann {
 // Perform a burn and counter burn to align orbits with another vessel
 function orbital_angle_align {
     parameter angle_desired.
+    parameter targ is 0.
 
     // User selects target ship, and initial phase angle is calculated
-    set target to telemetry["select_body_target"]().
+    if targ = 0 {
+        set targ to telemetry["select_body_target"]().
+        set target to targ.
+    }
     local angle_phase is telemetry["calculate_phase_angle"]().
     print("phase_angle_0 is " + angle_phase).
     
@@ -428,3 +436,51 @@ function match_inclination {
     }
     lock throttle to 0.
 }
+
+// Loop until our distance from the target is increasing
+function await_closest_approach {
+  until false {
+    local last_distance is target:distance.
+    wait 1.
+    if target:distance > last_distance {
+      break.
+    }
+  }
+}
+
+// Throttle against our relative velocity vector until we're increasing it
+function cancel_relative_velocity {
+  lock steering to target:velocity:orbit - ship:velocity:orbit.
+  wait 5.
+
+  lock throttle to 0.1.
+  until false {
+    set last_diff to (target:velocity:orbit - ship:velocity:orbit):mag.
+    wait 0.1.
+    if (target:velocity:orbit - ship:velocity:orbit):mag > last_diff {
+      lock throttle to 0. break.
+    }
+  }
+}
+
+// Throttle for five seconds toward the target
+function approach {
+  lock steering to target:position.
+  wait 5. lock throttle to 0.1. wait 5.
+  lock throttle to 0.
+}
+
+// Rendezvous with a target craft
+function rendezvous {
+    // Bring us in closer by steps
+    until target:distance < 500 {
+        await_closest_approach().
+        cancel_relative_velocity().
+        approach().
+    }
+
+    // Kill remaining relative velocity
+    cancel_relative_velocity().
+    print("Rendezvous complete!").
+}
+    

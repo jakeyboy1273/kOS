@@ -13,7 +13,7 @@ until apoapsis > 2863334 {
 set mapview to true.
 maneuver["circularise"]().
 
-maneuver["orbital_angle_align"](300).
+maneuver["orbital_angle_align"](0).
 set target to body.
 
 unlock steering. wait 1.

@@ -255,21 +255,6 @@ function transfer_score {
     return result.
 }
 
-// // Calculates a score based on periapsis of next patch, or distance at apoapsis of current patch if not
-// function transfer_score {
-//     parameter data.
-//     local mnv is node(data[0], data[1], data[2], data[3]).
-//     maneuver["add_maneuver"](mnv).
-//     local result is 0.
-//     if mnv:orbit:hasNextPatch {
-//         set result to mnv:orbit:nextPatch:periapsis.
-//     } else {
-//         set result to distance_to_target_at_apoapsis(mnv).
-//     }
-//     maneuver["remove_maneuver"](mnv).
-//     return result.
-// }
-
 // Calculates the distance to a target body at the maneuver's apoapsis
 function distance_to_target_at_apoapsis {
     parameter mnv.
