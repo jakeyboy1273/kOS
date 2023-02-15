@@ -32,7 +32,8 @@ global telemetry is lex(
     "orbit_binormal", orbit_binormal@,
     "relative_nodal_vector", relative_nodal_vector@,
     "angle_to_relative_node", angle_to_relative_node@,
-    "relative_inclination", relative_inclination@
+    "relative_inclination", relative_inclination@,
+    "convert_to_compass", convert_to_compass@
 ).
 function init {}
 telemetry["init"]().
@@ -328,7 +329,23 @@ function select_body_target {
 
     // Prompt the user to select a target
     print "Select target from list: ".
-    set target to target_list[terminal:input:getchar():toscalar].
+    
+    local char is 0.
+    local input is 0.
+    local finish_input is false.
+    until finish_input {
+        wait until terminal:input:haschar.
+        set char to terminal:input:getchar().
+        if char <> terminal:input:ENTER {
+            set input to input + char. 
+            terminal:input:clear. 
+        } else { 
+            clearscreen.
+            terminal:input:clear.
+            set finish_input to true.
+        }
+    }
+    set target to target_list[input:toscalar].
     return target.
 }
 
@@ -349,16 +366,24 @@ function stopping_distance {
     return ship:velocity:orbit:mag^2 / (2 * max_deceleration:mag).
 }
 
+// Calculate the acceleration of the ship
+function ship_acceleration {
+    local thrust is ship:availableThrust / ship:mass.
+    local max_acceleration is facing:vector*thrust.
+    return max_acceleration.
+}
+
+// Calculate how long it would take the ship to stop under body gravity
 function stopping_time {
     local grav is constant():g * (body:mass / body:radius^2).
-    local thrust is ship:availableThrust / ship:mass.
-    local max_deceleration is facing:vector*thrust - v(grav, 0, 0).
+    local max_deceleration is ship_acceleration() - v(grav, 0, 0).
 
     local a is max_deceleration:mag.
     local u is ship:velocity:orbit:mag.
     return u/a.
 }
 
+// Calculate how long it will take the ship to hit the ground in current conditions
 function time_to_impact { 
     local error is 1000.
     local previous_time is Time:Seconds.
@@ -410,8 +435,8 @@ function relative_nodal_vector {
 // Angle to relative node determined from args
 function angle_to_relative_node {
     parameter is_ascending is true.
-    parameter ves is ship.
     parameter tar is target.
+    parameter ves is ship.
 
     local join_vector is relative_nodal_vector(ves, tar).
     if is_ascending = false {
@@ -426,9 +451,29 @@ function angle_to_relative_node {
     return angle.
 }
 
+// Difference between the inclination of two crafts' orbits
 function relative_inclination {
   parameter targ is target.
   parameter u_time is time:seconds.
 
   return vang(vcrs(velocityAt(ship,u_time):orbit,positionAt(ship,u_time)), vcrs(velocityAt(targ,u_time):orbit,positionAt(targ,u_time))).
+}
+
+// Calculate the compass bearing and pitch up/down for a given vector on a given craft
+function convert_to_compass {
+  parameter pointing, ves is ship.
+
+  local east is vcrs(ves:up:vector, ves:north:vector).
+
+  local trig_x is vdot(ves:north:vector, pointing).
+  local trig_y is vdot(east, pointing).
+  local trig_z is vdot(ves:up:vector, pointing).
+
+  local compass is arctan2(trig_y, trig_x).
+  if compass < 0 {
+    set compass to 360 + compass.
+  }
+  local pitch is arctan2(trig_z, sqrt(trig_x^2 + trig_y^2)).
+
+  return list(compass, pitch).
 }

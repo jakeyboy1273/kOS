@@ -27,9 +27,6 @@ global maneuver is lex(
     "pid_control", pid_control@,
     "hoverslam", hoverslam@,
     "match_inclination", match_inclination@,
-    "await_closest_approach", await_closest_approach@,
-    "cancel_relative_velocity", cancel_relative_velocity@,
-    "approach", approach@,
     "rendezvous", rendezvous@
 ).
 function init {}
@@ -293,8 +290,8 @@ function hohmann {
 
 // Perform a burn and counter burn to align orbits with another vessel
 function orbital_angle_align {
-    parameter angle_desired.
-    parameter targ is 0.
+    parameter angle_desired is 0.
+    parameter targ is target.
 
     // User selects target ship, and initial phase angle is calculated
     if targ = 0 {
@@ -401,86 +398,87 @@ function hoverslam {
 
 // Perform a burn to match orbital inclination with that of a target craft
 function match_inclination {
+    parameter targ is target.
 
-    // Skip this step if 
-    if telemetry["relative_inclination"]() < 0.5 {
+    // Skip this step if inclinations are already basically the same
+    if telemetry["relative_inclination"](targ) < 0.5 {
         print("No inclination match is required.").
         return 0.
     }
 
-    // Find and warp to the next node
-    local ascending is true.
-    local next_node_angle is telemetry["angle_to_relative_node"]().
-    local normal_vec is -vcrs(ship:velocity:orbit,-body:position).
-    if next_node_angle < 0 {
-        set next_node_angle to telemetry["angle_to_relative_node"](False).
-        set normal_vec to -normal_vec.
-        set ascending to false.
-    }
-    local time_to_node is (next_node_angle/360) * orbit:period.
-    set warp_time to time:seconds + time_to_node - 20.
-    warpto(warp_time).
-    wait until time:seconds > warp_time.
-
-    // Lock steering to normal or anti-normal
-    if ascending {
-            lock steering to -vcrs(ship:velocity:orbit,-body:position).
-        } else {
-            lock steering to vcrs(ship:velocity:orbit,-body:position).
+    until telemetry["relative_inclination"](targ) < 0.5 {
+        // Find and warp to the next node
+        local ascending is true.
+        local next_node_angle is telemetry["angle_to_relative_node"](targ).
+        local normal_vec is -vcrs(ship:velocity:orbit,-body:position).
+        if next_node_angle < 0 {
+            set next_node_angle to telemetry["angle_to_relative_node"](False, targ).
+            set normal_vec to -normal_vec.
+            set ascending to false.
         }
-        wait 5.
+        local time_to_node is (next_node_angle/360) * orbit:period.
+        set warp_time to time:seconds + time_to_node - 20.
+        warpto(warp_time).
+        wait until time:seconds > warp_time.
 
-    // Throttle up until the relative inclination is below the desired value
-    until telemetry["relative_inclination"]() < 0.5 {
-        lock throttle to 1.
+        // Lock steering to normal or anti-normal
+        if ascending {
+                lock steering to -vcrs(ship:velocity:orbit,-body:position).
+            } else {
+                lock steering to vcrs(ship:velocity:orbit,-body:position).
+            }
+            wait 5.
+
+        // Throttle up until the relative inclination is at its minimum value
+        set inclination to telemetry["relative_inclination"](targ).
+        set last_inclination to inclination.
+        if ascending {
+            until inclination > last_inclination {
+                lock throttle to 1. wait 0.1.
+                set last_inclination to inclination.
+                set inclination to telemetry["relative_inclination"](targ).
+            }
+        } else {
+            until inclination < last_inclination {
+                lock throttle to 1. wait 0.1.
+                set last_inclination to inclination.
+                set inclination to telemetry["relative_inclination"](targ).
+            }
+        }
+        lock throttle to 0. wait 0.5.
     }
-    lock throttle to 0.
-}
-
-// Loop until our distance from the target is increasing
-function await_closest_approach {
-  until false {
-    local last_distance is target:distance.
-    wait 1.
-    if target:distance > last_distance {
-      break.
-    }
-  }
-}
-
-// Throttle against our relative velocity vector until we're increasing it
-function cancel_relative_velocity {
-  lock steering to target:velocity:orbit - ship:velocity:orbit.
-  wait 5.
-
-  lock throttle to 0.1.
-  until false {
-    set last_diff to (target:velocity:orbit - ship:velocity:orbit):mag.
-    wait 0.1.
-    if (target:velocity:orbit - ship:velocity:orbit):mag > last_diff {
-      lock throttle to 0. break.
-    }
-  }
-}
-
-// Throttle for five seconds toward the target
-function approach {
-  lock steering to target:position.
-  wait 5. lock throttle to 0.1. wait 5.
-  lock throttle to 0.
 }
 
 // Rendezvous with a target craft
 function rendezvous {
-    // Bring us in closer by steps
-    until target:distance < 500 {
-        await_closest_approach().
-        cancel_relative_velocity().
-        approach().
+    parameter targ is target.
+
+    // Formulate the maximum approach speed 
+    lock target_approach_speed to max(1, (2 + sqrt(max(0,(4 - 4 * (400 - 4 * targ:distance)))))/2).
+
+    // Define the necessary velocity vectors
+    lock relative_velocity_vec to ship:velocity:orbit - targ:velocity:orbit.
+    lock desired_approach_speed to min(relative_velocity_vec:mag, target_approach_speed).
+    lock desired_velocity_vec to targ:position:normalized * desired_approach_speed.
+    lock steering_vec to desired_velocity_vec - relative_velocity_vec.
+
+    // Lock steering for the duration of the maneuver
+    lock steering to steering_vec. wait 2.
+
+    // Adjust velocity vector as required until the distance is closed out
+    until targ:distance < 100 {   
+        if steering_vec:mag > 10 {
+            until steering_vec:mag < 1 {
+                lock throttle to 0.2.
+            }
+            lock throttle to 0.
+        }
     }
 
-    // Kill remaining relative velocity
-    cancel_relative_velocity().
-    print("Rendezvous complete!").
+    // Once close enough, cancel remaining relative velocity
+    lock steering to -relative_velocity_vec.
+    wait 2.
+    lock throttle to 0.1.
+    wait until relative_velocity_vec:mag < 0.5.
+    lock throttle to 0.
 }
-    

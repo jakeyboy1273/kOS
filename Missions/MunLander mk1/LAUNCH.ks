@@ -1,4 +1,4 @@
-// This script transfers to Munar orbit, then returns safely to Kerbin.
+// This script lands an autonomous probe on the Mun
 
 // Import libraries
 set maneuver to lex().
